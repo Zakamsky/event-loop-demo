@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event Loop — Browser vs Node.js</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Unbounded:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --card: #1a1a26;
+    --border: #2a2a3d;
+    --accent-b: #00d4ff;
+    --accent-n: #ff6b35;
+    --accent-g: #7fff6b;
+    --accent-y: #ffd700;
+    --text: #e8e8f0;
+    --muted: #7070a0;
+    --mono: 'JetBrains Mono', monospace;
+    --display: 'Unbounded', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* HERO */
+  .hero {
+    text-align: center;
+    padding: 60px 20px 40px;
+    position: relative;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(0,212,255,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero h1 {
+    font-family: var(--display);
+    font-size: clamp(28px, 5vw, 52px);
+    font-weight: 900;
+    letter-spacing: -1px;
+    line-height: 1.1;
+  }
+  .hero h1 span.b { color: var(--accent-b); }
+  .hero h1 span.n { color: var(--accent-n); }
+  .hero h1 span.vs {
+    color: var(--muted);
+    font-size: 0.5em;
+    display: block;
+    margin: 4px 0;
+    letter-spacing: 8px;
+  }
+  .hero p {
+    color: var(--muted);
+    margin-top: 16px;
+    font-size: 13px;
+  }
+
+  /* LAYOUT */
+  .container { max-width: 1200px; margin: 0 auto; padding: 0 20px 80px; }
+
+  /* SECTION TITLES */
+  .section-title {
+    font-family: var(--display);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* CONCEPT BLOCK */
+  .concept {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-bottom: 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  .concept::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .concept.browser::before { background: var(--accent-b); }
+  .concept.node::before { background: var(--accent-n); }
+  .concept.shared::before { background: linear-gradient(90deg, var(--accent-b), var(--accent-n)); }
+
+  .concept h3 {
+    font-family: var(--display);
+    font-size: 16px;
+    margin-bottom: 14px;
+  }
+  .concept.browser h3 { color: var(--accent-b); }
+  .concept.node h3 { color: var(--accent-n); }
+  .concept.shared h3 { color: var(--accent-y); }
+
+  /* TWO COLUMNS */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+  @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* FLOW DIAGRAM */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    margin-bottom: 32px;
+  }
+  .diagram-title {
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .diagram-title .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .dot.b { background: var(--accent-b); box-shadow: 0 0 8px var(--accent-b); }
+  .dot.n { background: var(--accent-n); box-shadow: 0 0 8px var(--accent-n); }
+
+  /* LOOP VISUALIZATION */
+  .loop-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+  }
+  .phase {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    cursor: default;
+    position: relative;
+  }
+  .phase:hover {
+    transform: translateX(4px);
+    filter: brightness(1.2);
+  }
+  .phase-num {
+    font-family: var(--display);
+    font-weight: 900;
+    font-size: 11px;
+    color: var(--muted);
+    min-width: 20px;
+  }
+  .phase-name {
+    font-weight: 700;
+    font-size: 13px;
+    min-width: 160px;
+  }
+  .phase-desc {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .arrow-down {
+    text-align: left;
+    padding-left: 48px;
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1;
+    margin: 1px 0;
+  }
+
+  /* BROWSER PHASES */
+  .ph-call    { background: rgba(127,255,107,0.08); border-color: rgba(127,255,107,0.25); }
+  .ph-micro   { background: rgba(255,215,0,0.08);   border-color: rgba(255,215,0,0.3);    }
+  .ph-render  { background: rgba(0,212,255,0.08);   border-color: rgba(0,212,255,0.25);   }
+  .ph-task    { background: rgba(160,100,255,0.08); border-color: rgba(160,100,255,0.25); }
+
+  .ph-call .phase-name   { color: var(--accent-g);    }
+  .ph-micro .phase-name  { color: var(--accent-y);    }
+  .ph-render .phase-name { color: var(--accent-b);    }
+  .ph-task .phase-name   { color: #a064ff;            }
+
+  /* NODE PHASES */
+  .np-timers   { background: rgba(255,107,53,0.10);  border-color: rgba(255,107,53,0.3);  }
+  .np-pending  { background: rgba(255,107,53,0.07);  border-color: rgba(255,107,53,0.2);  }
+  .np-idle     { background: rgba(255,107,53,0.05);  border-color: rgba(255,107,53,0.15); }
+  .np-poll     { background: rgba(255,107,53,0.12);  border-color: rgba(255,107,53,0.35); }
+  .np-check    { background: rgba(255,215,0,0.08);   border-color: rgba(255,215,0,0.25);  }
+  .np-close    { background: rgba(255,107,53,0.05);  border-color: rgba(255,107,53,0.15); }
+  .np-micro    { background: rgba(255,215,0,0.10);   border-color: rgba(255,215,0,0.3);   }
+
+  .np-timers .phase-name   { color: var(--accent-n); }
+  .np-pending .phase-name  { color: #ff9966; }
+  .np-idle .phase-name     { color: #cc7755; }
+  .np-poll .phase-name     { color: #ff6b35; }
+  .np-check .phase-name    { color: var(--accent-y); }
+  .np-close .phase-name    { color: #cc7755; }
+  .np-micro .phase-name    { color: var(--accent-y); }
+
+  /* MICROTASK BADGE */
+  .badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-family: var(--display);
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+  }
+  .badge.micro { background: rgba(255,215,0,0.2); color: var(--accent-y); border: 1px solid rgba(255,215,0,0.4); }
+  .badge.macro { background: rgba(160,100,255,0.2); color: #a064ff; border: 1px solid rgba(160,100,255,0.4); }
+  .badge.node  { background: rgba(255,107,53,0.2);  color: var(--accent-n); border: 1px solid rgba(255,107,53,0.4); }
+
+  /* QUEUE TABLE */
+  .queue-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .queue-table th {
+    text-align: left;
+    padding: 8px 12px;
+    font-family: var(--display);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .queue-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid rgba(42,42,61,0.5);
+    vertical-align: top;
+  }
+  .queue-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .queue-table code {
+    background: rgba(0,212,255,0.1);
+    color: var(--accent-b);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  /* DIFF TABLE */
+  .diff-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .diff-table th {
+    padding: 10px 16px;
+    font-family: var(--display);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .diff-table th:nth-child(1) { color: var(--muted); }
+  .diff-table th:nth-child(2) { color: var(--accent-b); }
+  .diff-table th:nth-child(3) { color: var(--accent-n); }
+  .diff-table td {
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .diff-table td:nth-child(1) { color: var(--muted); font-size: 12px; }
+  .diff-table td:nth-child(2) { color: #a0e8ff; }
+  .diff-table td:nth-child(3) { color: #ffb08a; }
+  .diff-table tr:hover td { background: rgba(255,255,255,0.015); }
+
+  /* CODE EXAMPLE */
+  pre {
+    background: #080810;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.7;
+    margin: 0;
+  }
+  .cm  { color: #555577; }   /* comment */
+  .kw  { color: #ff79c6; }   /* keyword */
+  .fn  { color: var(--accent-b); }  /* function */
+  .str { color: var(--accent-g); }  /* string */
+  .num { color: var(--accent-n); }  /* number */
+  .out { color: var(--accent-y); font-style: italic; }  /* output */
+
+  /* SUMMARY BOX */
+  .summary {
+    background: linear-gradient(135deg, rgba(0,212,255,0.05), rgba(255,107,53,0.05));
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-top: 32px;
+  }
+  .summary h3 {
+    font-family: var(--display);
+    font-size: 14px;
+    color: var(--accent-y);
+    margin-bottom: 16px;
+    letter-spacing: 1px;
+  }
+  .rule {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+  .rule-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .rule-text { color: var(--text); }
+  .rule-text b { color: var(--accent-y); }
+
+  /* LOOP BACK ARROW */
+  .loop-back {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    padding-left: 12px;
+  }
+  .loop-back-line {
+    flex: 1;
+    height: 1px;
+    border-bottom: 2px dashed var(--border);
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.06);
+    color: var(--muted);
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>
+    <span class="b">Browser</span>
+    <span class="vs">vs</span>
+    <span class="n">Node.js</span>
+  </h1>
+  <p>Полный разбор Event Loop — как работает и в чём принципиальное отличие</p>
+</div>
+
+<div class="container">
+
+  <!-- ═══════════════════════════════════════════════════
+       BLOCK 0 — ЧТО ТАКОЕ EVENT LOOP ВООБЩЕ
+  ════════════════════════════════════════════════════ -->
+  <div class="section-title">00 — основа</div>
+
+  <div class="concept shared">
+    <h3>Что такое Event Loop?</h3>
+    <p style="margin-bottom:12px">JavaScript — <b style="color:var(--accent-y)">однопоточный</b> язык. Он может выполнять только одну операцию в каждый момент времени. Но браузер и сервер должны обрабатывать сеть, файлы, таймеры — всё одновременно.</p>
+    <p style="color:var(--muted)">Event Loop — это механизм, который решает эту проблему. Он постоянно крутится и решает: <i>что выполнять следующим</i>, когда Call Stack пустой.</p>
+  </div>
+
+  <div class="concept shared">
+    <h3>Общая модель (работает везде)</h3>
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top:8px">
+      <div style="padding:16px; background:rgba(127,255,107,0.06); border:1px solid rgba(127,255,107,0.2); border-radius:8px">
+        <div style="color:var(--accent-g); font-weight:700; margin-bottom:6px">📚 Call Stack</div>
+        <div style="color:var(--muted); font-size:12px">Стек вызовов. Сюда попадает весь синхронный код. Выполняется сразу, LIFO.</div>
+      </div>
+      <div style="padding:16px; background:rgba(255,215,0,0.06); border:1px solid rgba(255,215,0,0.2); border-radius:8px">
+        <div style="color:var(--accent-y); font-weight:700; margin-bottom:6px">⚡ Microtask Queue</div>
+        <div style="color:var(--muted); font-size:12px">Очередь микрозадач. Выполняется <b style="color:var(--accent-y)">сразу после каждой задачи</b>, до следующего рендера/тика.</div>
+      </div>
+      <div style="padding:16px; background:rgba(160,100,255,0.06); border:1px solid rgba(160,100,255,0.2); border-radius:8px">
+        <div style="color:#a064ff; font-weight:700; margin-bottom:6px">🕐 Macrotask Queue</div>
+        <div style="color:var(--muted); font-size:12px">Очередь задач. setTimeout, setInterval, I/O события. Берётся по одной за раз.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       BLOCK 1 — BROWSER EVENT LOOP
+  ════════════════════════════════════════════════════ -->
+  <div class="section-title">01 — браузер</div>
+
+  <div class="two-col">
+    <div class="diagram">
+      <div class="diagram-title"><span class="dot b"></span> Browser Event Loop — цикл</div>
+      <div class="loop-wrap">
+
+        <div class="phase ph-call">
+          <div class="phase-num">①</div>
+          <div class="phase-name">Call Stack</div>
+          <div class="phase-desc">Выполняем весь синхронный код до конца</div>
+        </div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase ph-micro">
+          <div class="phase-num">②</div>
+          <div class="phase-name">Microtasks <span class="badge micro">MICRO</span></div>
+          <div class="phase-desc">Все Promise.then(), queueMicrotask()</div>
+        </div>
+        <div style="padding-left:48px; font-size:11px; color:var(--muted); margin:2px 0">↻ повторяем, пока очередь не пуста</div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase ph-render">
+          <div class="phase-num">③</div>
+          <div class="phase-name">Render <span class="tag">~60fps</span></div>
+          <div class="phase-desc">requestAnimationFrame, layout, paint</div>
+        </div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase ph-task">
+          <div class="phase-num">④</div>
+          <div class="phase-name">Macrotask <span class="badge macro">MACRO</span></div>
+          <div class="phase-desc">Одна задача: setTimeout, click, message...</div>
+        </div>
+
+        <div class="loop-back">
+          <span>↩ возврат к шагу ①</span>
+          <div class="loop-back-line"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="concept browser" style="margin-bottom:0">
+      <h3>Ключевые моменты</h3>
+
+      <div class="rule"><div class="rule-icon">🎨</div><div class="rule-text">Браузер <b>рендерит DOM</b> между тиками — это уникальная черта. Event Loop синхронизирован с отрисовкой.</div></div>
+      <div class="rule"><div class="rule-icon">⚡</div><div class="rule-text"><b>Микрозадачи выполняются полностью</b> перед рендером. Бесконечная очередь микрозадач = заморозка страницы.</div></div>
+      <div class="rule"><div class="rule-icon">🖱</div><div class="rule-text">События DOM (click, input) — это <b>макрозадачи</b>. Каждый колбэк = отдельный тик.</div></div>
+      <div class="rule"><div class="rule-icon">🔧</div><div class="rule-text">Web APIs (fetch, setTimeout) — это не JS. Они работают в браузере параллельно, а результат кладут в очередь.</div></div>
+
+      <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border)">
+        <table class="queue-table">
+          <tr><th>API</th><th>Тип</th></tr>
+          <tr><td><code>Promise.then()</code></td><td><span class="badge micro">micro</span></td></tr>
+          <tr><td><code>queueMicrotask()</code></td><td><span class="badge micro">micro</span></td></tr>
+          <tr><td><code>MutationObserver</code></td><td><span class="badge micro">micro</span></td></tr>
+          <tr><td><code>setTimeout / setInterval</code></td><td><span class="badge macro">macro</span></td></tr>
+          <tr><td><code>requestAnimationFrame</code></td><td>render-phase</td></tr>
+          <tr><td><code>addEventListener</code></td><td><span class="badge macro">macro</span></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       BLOCK 2 — NODE.JS EVENT LOOP
+  ════════════════════════════════════════════════════ -->
+  <div class="section-title">02 — node.js</div>
+
+  <div class="two-col">
+    <div class="diagram">
+      <div class="diagram-title"><span class="dot n"></span> Node.js Event Loop — фазы libuv</div>
+      <div class="loop-wrap">
+
+        <div class="phase np-micro">
+          <div class="phase-num">→</div>
+          <div class="phase-name">nextTick + Microtasks</div>
+          <div class="phase-desc">process.nextTick(), затем Promise.then()</div>
+        </div>
+        <div style="padding-left:48px; font-size:11px; color:var(--muted); margin:2px 0">↻ выполняются между каждой фазой</div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase np-timers">
+          <div class="phase-num">①</div>
+          <div class="phase-name">timers</div>
+          <div class="phase-desc">Колбэки setTimeout() и setInterval()</div>
+        </div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase np-pending">
+          <div class="phase-num">②</div>
+          <div class="phase-name">pending callbacks</div>
+          <div class="phase-desc">I/O ошибки прошлого тика</div>
+        </div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase np-idle">
+          <div class="phase-num">③</div>
+          <div class="phase-name">idle / prepare</div>
+          <div class="phase-desc">Внутреннее использование libuv</div>
+        </div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase np-poll" style="border-width:2px">
+          <div class="phase-num">④</div>
+          <div class="phase-name">poll ★</div>
+          <div class="phase-desc">Ждёт I/O события (файлы, сеть, БД)</div>
+        </div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase np-check">
+          <div class="phase-num">⑤</div>
+          <div class="phase-name">check</div>
+          <div class="phase-desc">Колбэки setImmediate()</div>
+        </div>
+        <div class="arrow-down">↓</div>
+
+        <div class="phase np-close">
+          <div class="phase-num">⑥</div>
+          <div class="phase-name">close callbacks</div>
+          <div class="phase-desc">socket.on('close'), cleanup</div>
+        </div>
+
+        <div class="loop-back">
+          <span>↩ следующая итерация</span>
+          <div class="loop-back-line"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="concept node" style="margin-bottom:0">
+      <h3>Ключевые моменты</h3>
+
+      <div class="rule"><div class="rule-icon">🔄</div><div class="rule-text">Node.js использует <b>libuv</b> — C-библиотеку, которая управляет фазами. Это не браузерный API.</div></div>
+      <div class="rule"><div class="rule-icon">🚫</div><div class="rule-text"><b>Нет рендера</b>. Нет DOM. Цикл крутится максимально быстро, без привязки к 60fps.</div></div>
+      <div class="rule"><div class="rule-icon">⚡</div><div class="rule-text"><b>process.nextTick()</b> — особый приоритет. Выполняется раньше любых Promise, между фазами. Мощный, но опасный инструмент.</div></div>
+      <div class="rule"><div class="rule-icon">📂</div><div class="rule-text">Фаза <b>poll</b> — сердце сервера. Здесь Node ждёт новых данных из файлов и сети. Именно тут происходит вся I/O магия.</div></div>
+      <div class="rule"><div class="rule-icon">⚡</div><div class="rule-text"><b>setImmediate()</b> всегда выполняется после I/O текущего тика — удобно для отложенного выполнения после I/O.</div></div>
+
+      <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border)">
+        <table class="queue-table">
+          <tr><th>API</th><th>Фаза/тип</th></tr>
+          <tr><td><code>process.nextTick()</code></td><td style="color:var(--accent-n)">nextTick queue ⚡</td></tr>
+          <tr><td><code>Promise.then()</code></td><td><span class="badge micro">micro</span></td></tr>
+          <tr><td><code>setTimeout(fn, 0)</code></td><td>timers ①</td></tr>
+          <tr><td><code>setImmediate()</code></td><td>check ⑤</td></tr>
+          <tr><td><code>fs.readFile()</code></td><td>poll ④ → pending</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       BLOCK 3 — СРАВНЕНИЕ
+  ════════════════════════════════════════════════════ -->
+  <div class="section-title">03 — принципиальное отличие</div>
+
+  <div class="concept shared">
+    <h3>Browser vs Node.js — таблица отличий</h3>
+    <table class="diff-table">
+      <tr>
+        <th>Параметр</th>
+        <th>🌐 Browser</th>
+        <th>🟢 Node.js</th>
+      </tr>
+      <tr>
+        <td>Движок</td>
+        <td>HTML Living Standard (W3C)</td>
+        <td>libuv (C-библиотека)</td>
+      </tr>
+      <tr>
+        <td>Рендер</td>
+        <td>✅ Между тиками (~60fps)</td>
+        <td>❌ Нет DOM, нет рендера</td>
+      </tr>
+      <tr>
+        <td>Структура</td>
+        <td>Call Stack → Micro → Render → Macro</td>
+        <td>6 фаз: timers → pending → idle → poll → check → close</td>
+      </tr>
+      <tr>
+        <td>Микрозадачи</td>
+        <td>После каждой макрозадачи</td>
+        <td>После каждой <b>фазы</b></td>
+      </tr>
+      <tr>
+        <td>process.nextTick</td>
+        <td>❌ Не существует</td>
+        <td>✅ Выше приоритет, чем у Promise</td>
+      </tr>
+      <tr>
+        <td>setImmediate</td>
+        <td>❌ Нестандартный, не рекомендуется</td>
+        <td>✅ Фаза check — после I/O текущего тика</td>
+      </tr>
+      <tr>
+        <td>setTimeout(fn,0)</td>
+        <td>Мин. ~4ms, макрозадача</td>
+        <td>Фаза timers, может отложиться за poll</td>
+      </tr>
+      <tr>
+        <td>I/O модель</td>
+        <td>Web APIs (браузерные)</td>
+        <td>libuv Thread Pool (4 потока по умолчанию)</td>
+      </tr>
+      <tr>
+        <td>requestAnimationFrame</td>
+        <td>✅ Перед рендером</td>
+        <td>❌ Не существует</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       BLOCK 4 — КОД ПРИМЕР
+  ════════════════════════════════════════════════════ -->
+  <div class="section-title">04 — пример с порядком выполнения</div>
+
+  <div class="two-col">
+    <div>
+      <div style="color:var(--accent-b); font-family:var(--display); font-size:12px; margin-bottom:8px; letter-spacing:1px">КОД</div>
+<pre>
+<span class="cm">// Что выведется и в каком порядке?</span>
+
+console.log(<span class="str">'1: sync'</span>);
+
+setTimeout(() => console.log(<span class="str">'2: timeout'</span>), <span class="num">0</span>);
+
+Promise.resolve()
+  .then(() => console.log(<span class="str">'3: promise'</span>));
+
+queueMicrotask(() => console.log(<span class="str">'4: microtask'</span>));
+
+<span class="cm">// Node.js only:</span>
+<span class="kw">if</span> (<span class="kw">typeof</span> process !== <span class="str">'undefined'</span>) {
+  process.nextTick(() => console.log(<span class="str">'5: nextTick'</span>));
+}
+
+console.log(<span class="str">'6: sync end'</span>);
+</pre>
+    </div>
+    <div>
+      <div style="color:var(--accent-g); font-family:var(--display); font-size:12px; margin-bottom:8px; letter-spacing:1px">РЕЗУЛЬТАТ</div>
+<pre>
+<span class="out">// 🌐 Browser:</span>
+<span class="out">1: sync</span>
+<span class="out">6: sync end</span>
+<span class="cm">// --- стек пуст, идём в микрозадачи ---</span>
+<span class="out">3: promise</span>
+<span class="out">4: microtask</span>
+<span class="cm">// --- рендер (если нужен) ---</span>
+<span class="cm">// --- берём макрозадачу ---</span>
+<span class="out">2: timeout</span>
+
+<span class="out">// 🟢 Node.js:</span>
+<span class="out">1: sync</span>
+<span class="out">6: sync end</span>
+<span class="cm">// --- nextTick queue ---</span>
+<span class="out">5: nextTick</span>
+<span class="cm">// --- microtask queue ---</span>
+<span class="out">3: promise</span>
+<span class="out">4: microtask</span>
+<span class="cm">// --- фаза timers ---</span>
+<span class="out">2: timeout</span>
+</pre>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       SUMMARY
+  ════════════════════════════════════════════════════ -->
+  <div class="summary">
+    <h3>⚡ ГЛАВНОЕ, ЧТО НУЖНО ЗАПОМНИТЬ</h3>
+
+    <div class="rule"><div class="rule-icon">1️⃣</div><div class="rule-text"><b>Синхронный код всегда первый.</b> Call Stack очищается полностью.</div></div>
+    <div class="rule"><div class="rule-icon">2️⃣</div><div class="rule-text"><b>Микрозадачи всегда раньше макрозадач.</b> Promise.then() выполнится до следующего setTimeout.</div></div>
+    <div class="rule"><div class="rule-icon">3️⃣</div><div class="rule-text"><b>В Node.js process.nextTick() — самый высокий приоритет</b> среди асинхронных задач. Выполняется до Promise.</div></div>
+    <div class="rule"><div class="rule-icon">4️⃣</div><div class="rule-text"><b>Главное отличие браузера</b> — наличие фазы рендера. Event Loop браузера работает в ритме экрана.</div></div>
+    <div class="rule"><div class="rule-icon">5️⃣</div><div class="rule-text"><b>Главное отличие Node.js</b> — 6 явных фаз libuv с poll-фазой в центре. Микрозадачи дренируются между каждой фазой, а не только между макрозадачами.</div></div>
+    <div class="rule"><div class="rule-icon">⚠️</div><div class="rule-text"><b>Блокировка стека = зависание.</b> Тяжёлые вычисления блокируют весь цикл — и в браузере (интерфейс), и в Node.js (все запросы).</div></div>
+  </div>
+
+</div>
+</body>
+</html>
